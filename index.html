@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Miyasaki Family Tree</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #faf9f6;
+    --surface: #ffffff;
+    --border: #e2ddd6;
+    --text: #1a1714;
+    --text2: #6b6560;
+    --text3: #9b948d;
+    --radius: 8px;
+    --gen1: #534AB7;
+    --gen2: #7F77DD;
+    --gen3: #1D9E75;
+    --gen4: #378ADD;
+    --gen5: #D85A30;
+    --married: #888780;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #18161380;
+      --surface: #222018;
+      --border: #3a3730;
+      --text: #f0ede8;
+      --text2: #a09890;
+      --text3: #706860;
+    }
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 14px 20px 12px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; position: sticky; top: 0; z-index: 100; }
+  .title-block h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .title-block p { font-size: 12px; color: var(--text2); margin-top: 1px; }
+  .controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .btn { font-size: 12px; padding: 5px 11px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: var(--bg); }
+  #search { font-size: 12px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); width: 160px; }
+  #search::placeholder { color: var(--text3); }
+  #count { font-size: 11px; color: var(--text3); }
+  #legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 20px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text2); }
+  .leg { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  #wrap { flex: 1; overflow: auto; position: relative; }
+  svg#tree { display: block; cursor: grab; }
+  svg#tree:active { cursor: grabbing; }
+  .link { fill: none; }
+  .node-g { cursor: pointer; }
+  .node-g:hover rect { filter: brightness(0.91); }
+  #tooltip { position: fixed; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 13px; font-size: 12px; color: var(--text); pointer-events: none; display: none; max-width: 210px; z-index: 9999; line-height: 1.55; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+  #tooltip strong { display: block; margin-bottom: 2px; font-size: 13px; }
+  #tooltip .tt-dates { color: var(--text2); font-size: 11px; }
+  #tooltip .tt-note { color: var(--text3); font-size: 11px; font-style: italic; margin-top: 3px; }
+  #tooltip .tt-hint { color: var(--text3); font-size: 11px; margin-top: 4px; }
+  footer { padding: 10px 20px; font-size: 11px; color: var(--text3); background: var(--surface); border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-block">
+    <h1>Miyasaki Family Tree</h1>
+    <p>Nipomo, California · July 2026 Reunion &nbsp;·&nbsp; <span id="count"></span></p>
+  </div>
+  <div class="controls">
+    <button class="btn" onclick="expandAll()">Expand all</button>
+    <button class="btn" onclick="collapseAll()">Collapse all</button>
+    <button class="btn" onclick="resetZoom()">Reset view</button>
+    <input id="search" placeholder="Search name…" oninput="searchNode(this.value)" />
+  </div>
+</header>
+
+<div id="legend">
+  <div class="leg"><div class="dot" style="background:var(--gen1)"></div>Issei / Nisei (Gen 1–2)</div>
+  <div class="leg"><div class="dot" style="background:var(--gen3)"></div>Sansei (3rd)</div>
+  <div class="leg"><div class="dot" style="background:var(--gen4)"></div>Yonsei (4th)</div>
+  <div class="leg"><div class="dot" style="background:var(--gen5)"></div>Go-sei (5th)</div>
+  <div class="leg"><div class="dot" style="background:var(--married)"></div>Married in</div>
+  <div class="leg" style="margin-left:auto;color:var(--text3)">Scroll to zoom · Drag to pan · Click node to expand/collapse</div>
+</div>
+
+<div id="wrap"><svg id="tree"></svg></div>
+<div id="tooltip"></div>
+
+<footer>Miyasaki Family · Draft July 2026 · Contact Dane (dane.galloway@gmail.com) with corrections.</footer>
+
+<script>
+const GEN_COLORS = { 1:"#534AB7", 2:"#7F77DD", 3:"#1D9E75", 4:"#378ADD", 5:"#D85A30", [-1]:"#888780" };
+const W=134, H=52, XGAP=16, YGEN=88;
+
+const RAW = [
+  {id:"kunihei",name:"Kunihei Miyasaki",b:"1886",d:"1960",gen:1,spouse:"sono",children:["mary","jack_nii","chiyo","jane","john","lily"],notes:"Founding member Showa Hall. b. Fukuoka, Japan."},
+  {id:"sono",name:"Sono Daimaru Miyasaki",b:"1899",d:"1965",gen:1,married_to:"kunihei",notes:"b. Yukuhashi, Fukuoka-ken."},
+  {id:"mary",name:"Mary Miyasaki",b:"~1922",d:"1966",gen:2,spouse:"tom",children:["jean","nadine","julie_t"],notes:"Eldest daughter. Valedictorian."},
+  {id:"tom",name:"Tom Takahashi",gen:-1,married_to:"mary",notes:"m. Mary, May 1947"},
+  {id:"jack_nii",name:"Jack Kunio Miyasaki",b:"1924",d:"2012",gen:2,spouse:"margaret",children:["stanley","judy","cindy","mark_a"],notes:"Wrote memoir July 2002."},
+  {id:"margaret",name:"Margaret Masako Yamada",b:"1927",gen:-1,married_to:"jack_nii",notes:"m. 26 Feb 1950"},
+  {id:"chiyo",name:"Chiyo Miyasaki",b:"1925",d:"1999",gen:2,spouse:"jim_k",children:["ken_k","joyce"],notes:"m. Jim Kanemoto, 21 Mar 1944"},
+  {id:"jim_k",name:"Jim Kanemoto",b:"1917",d:"2006",gen:-1,married_to:"chiyo",notes:"Brother of George Kanemoto"},
+  {id:"jane",name:"Jane Miyasaki",b:"1927",d:"2016",gen:2,spouse:"george_k",children:["ed_k","dale_k","gail_k","karen_k"],notes:"Twin of John. m. George Kanemoto, 17 Jan 1948."},
+  {id:"george_k",name:"George Kanemoto",b:"1919",d:"2009",gen:-1,married_to:"jane",notes:"Brother of Jim Kanemoto"},
+  {id:"john",name:"John Miyasaki",b:"1927",d:"1993",gen:2,spouse:"mabel",children:["glenn","gwendy","tammy","meri"],notes:"Twin of Jane. 8th Air Force, Fukuoka."},
+  {id:"mabel",name:"Mabel Shibao Miyasaki",b:"1925",d:"2026",gen:-1,married_to:"john",notes:"John's 1st wife. Middle name Fujiko honored in Veda Fujiko Golden Henry."},
+  {id:"lily",name:"Lily Miyasaki",b:"~1930",gen:2,spouse:"mits",children:["larry_f","rodney_f","greg_f","brian_f","sharon_f"],notes:"Youngest child."},
+  {id:"mits",name:"Mits Fukaye",gen:-1,married_to:"lily"},
+  {id:"jean",name:"Jean Takahashi Amano",b:"1950",gen:3,spouse:"stephen_a",children:["melanie"],notes:"'Wawa' to grandchildren, 'Auntie Jeannie' to Takahashi clan."},
+  {id:"stephen_a",name:"Stephen Amano",b:"1950",gen:-1,married_to:"jean",notes:"'Bapa' to grandchildren."},
+  {id:"nadine",name:"Nadine Takahashi Baggs",b:"1952",gen:3,spouse:"lloyd_b",children:["jenny_l","daniel_b"]},
+  {id:"lloyd_b",name:"Lloyd Baggs",b:"1948",gen:-1,married_to:"nadine",notes:"Founder/CEO, LR Baggs"},
+  {id:"julie_t",name:"Julie Takahashi Conaway",b:"1958",gen:3,spouse:"mark_c",children:["clinton","emmett","marcus","kenji"]},
+  {id:"mark_c",name:"Mark Conaway",b:"1955",gen:-1,married_to:"julie_t"},
+  {id:"stanley",name:"Stanley Miyasaki",b:"1951",gen:3,children:["jenny_m"],notes:"Retired, Mountain Truck & Equipment (46 yrs)"},
+  {id:"judy",name:"Judy K. Miyasaki",b:"1952",gen:3,notes:"Instigated Jack's memoir. Wrote published family history."},
+  {id:"cindy",name:"Cindy Matsumoto",b:"~1959",gen:3,children:["grayson"],notes:"⚠ DOCX says b.~1955; XLSX converts to ~1959."},
+  {id:"mark_a",name:"Mark A. Miyasaki",b:"1964",gen:3,children:["michael_a","madison_a","peighton_a","gabrielle_a"]},
+  {id:"ken_k",name:"Ken Kanemoto",b:"1945",gen:3,spouse:"karen_kn",children:["cherie"]},
+  {id:"karen_kn",name:"Karen Kanemoto",b:"1947",gen:-1,married_to:"ken_k"},
+  {id:"joyce",name:"Joyce Kanemoto Williams",b:"1946",d:"2025",gen:3,spouse:"jack_w",children:["colleen","jeff_m","barbara_c"]},
+  {id:"jack_w",name:"Jack Williams",b:"1938",gen:-1,married_to:"joyce"},
+  {id:"ed_k",name:"Ed Kanemoto",b:"1950",gen:3,spouse:"jan_k",children:["keith_k","scott_k"],notes:"Jan also listed as parent of Katie & Kori Leman"},
+  {id:"jan_k",name:"Jan Kanemoto",b:"1949",gen:-1,married_to:"ed_k",children:["katie_l","kori_l"]},
+  {id:"dale_k",name:"Dale Kanemoto",b:"1952",gen:3,notes:"Twin with Gail. Retired."},
+  {id:"gail_k",name:"Gail Kanemoto Janson",b:"1952",gen:3,spouse:"donald_j",children:["jamie_g","dean_h","cory_j","kate_m"],notes:"Twin with Dale. Retired (jewelry store)."},
+  {id:"donald_j",name:"Donald Janson",b:"1950",gen:-1,married_to:"gail_k"},
+  {id:"karen_k",name:"Karen Kanemoto Wood",b:"1955",gen:3,spouse:"don_w",children:["eric_w","julie_h"]},
+  {id:"don_w",name:"Don Wood",b:"1955",gen:-1,married_to:"karen_k"},
+  {id:"glenn",name:"Glenn Miyasaki",gen:3,children:["sara_w","alison_m","teddy"]},
+  {id:"gwendy",name:"Gwendy Miyasaki Lykke",b:"1953",gen:3,spouse:"keith_ly",children:["jason_r","niels_l","kris_l"]},
+  {id:"keith_ly",name:"Keith Lykke",d:"2016",gen:-1,married_to:"gwendy"},
+  {id:"tammy",name:"Tammy Miyasaki Golden",b:"1960",gen:3,spouse:"jim_g",children:["angela","melissa_g"]},
+  {id:"jim_g",name:"Jim Golden",b:"1957",gen:-1,married_to:"tammy"},
+  {id:"meri",name:"Meri Miyasaki Campbell",b:"1967",gen:3,spouse:"paul_c",children:["heather"]},
+  {id:"paul_c",name:"Paul Campbell",b:"1962",gen:-1,married_to:"meri"},
+  {id:"larry_f",name:"Larry Fukaye",gen:3},
+  {id:"rodney_f",name:"Rodney Fukaye",gen:3},
+  {id:"greg_f",name:"Greg Fukaye",b:"1965",gen:3,spouse:"cathy_f",children:["shane_f","alexis_f"]},
+  {id:"cathy_f",name:"Cathy Fukaye",b:"1967",gen:-1,married_to:"greg_f"},
+  {id:"brian_f",name:"Brian Fukaye",gen:3},
+  {id:"sharon_f",name:"Sharon Fukaye",b:"1964",gen:3},
+  {id:"melanie",name:"Melanie Amano",b:"1983",gen:4,spouse:"jeremy_j",children:["kenzo","koji","naji"]},
+  {id:"jeremy_j",name:"Jeremy Johnson",b:"1982",gen:-1,married_to:"melanie"},
+  {id:"jenny_l",name:"Jenny Baggs Luckett",b:"1980",gen:4,spouse:"mike_l",children:["shepard","delaney_l"]},
+  {id:"mike_l",name:"Mike Luckett",b:"1977",gen:-1,married_to:"jenny_l"},
+  {id:"daniel_b",name:"Daniel Baggs",b:"1984",gen:4,spouse:"fiona_b",children:["miller","owen_b"]},
+  {id:"fiona_b",name:"Fiona Baggs",b:"1978",gen:-1,married_to:"daniel_b"},
+  {id:"clinton",name:"Clinton Conaway",b:"1979",gen:4,spouse:"blythe",children:["braxton","emmaline","ovella"]},
+  {id:"blythe",name:"Blythe Conaway",b:"1982",gen:-1,married_to:"clinton"},
+  {id:"emmett",name:"Emmett Conaway",b:"1981",gen:4,spouse:"taryn",children:["zoe","ella_c","owen_c","devin","clementine"]},
+  {id:"taryn",name:"Taryn Conaway",b:"~1982",gen:-1,married_to:"emmett"},
+  {id:"marcus",name:"Marcus Conaway",b:"1984",gen:4,spouse:"juju",children:["ivie","woodrow","coco"]},
+  {id:"juju",name:"Juju Conaway",b:"1986",gen:-1,married_to:"marcus"},
+  {id:"kenji",name:"Kenji Conaway",b:"1989",gen:4,spouse:"andrea",children:["kareem","nyjah","masai"]},
+  {id:"andrea",name:"Andrea Conaway",b:"1990",gen:-1,married_to:"kenji"},
+  {id:"jenny_m",name:"Jenny Miyasaki",b:"1979",gen:4,notes:"Los Angeles, CA"},
+  {id:"grayson",name:"Grayson Misako Matsumoto",gen:4,notes:"⚠ In XLSX only, not in DOCX"},
+  {id:"michael_a",name:"Michael A. Miyasaki",b:"1995",gen:4},
+  {id:"madison_a",name:"Madison A. Miyasaki",b:"2000",gen:4},
+  {id:"peighton_a",name:"Peighton A. Miyasaki",b:"2001",gen:4},
+  {id:"gabrielle_a",name:"Gabrielle Miyasaki Jackson",b:"1998",gen:4,spouse:"vernon_j"},
+  {id:"vernon_j",name:"Vernon Jackson",b:"1998",gen:-1,married_to:"gabrielle_a"},
+  {id:"cherie",name:"Cherie Kanemoto",b:"1975",gen:4,children:["ella_tk"]},
+  {id:"colleen",name:"Colleen Kanemoto",b:"1963",d:"2018",gen:4,children:["sam_p","grace_p"]},
+  {id:"jeff_m",name:"Jeff Miller",b:"1967",gen:4,spouse:"stephanie_g",children:["opaline"]},
+  {id:"stephanie_g",name:"Stephanie Goodenough",b:"1976",gen:-1,married_to:"jeff_m"},
+  {id:"barbara_c",name:"Barbara Christenson",b:"1969",gen:4,spouse:"wade_c",children:["davis_c","kyle_c"]},
+  {id:"wade_c",name:"Wade Christenson",b:"1968",gen:-1,married_to:"barbara_c"},
+  {id:"keith_k",name:"Keith Kanemoto",b:"1976",gen:4,spouse:"kelli_k",children:["james_k"]},
+  {id:"kelli_k",name:"Kelli Kanemoto",b:"1978",gen:-1,married_to:"keith_k"},
+  {id:"scott_k",name:"Scott Kanemoto",b:"1980",gen:4,spouse:"beth_k",children:["sophie_k","kai_k","klay_k"]},
+  {id:"beth_k",name:"Beth Kanemoto",b:"1984",gen:-1,married_to:"scott_k"},
+  {id:"katie_l",name:"Katie Leman",b:"1972",gen:4,spouse:"michael_sl",notes:"Child of Jan Kanemoto"},
+  {id:"michael_sl",name:"Michael Slater",gen:-1,married_to:"katie_l"},
+  {id:"kori_l",name:"Kori Leman",b:"1974",gen:4,spouse:"kevin_b",children:["pierce","branton"],notes:"Child of Jan Kanemoto"},
+  {id:"kevin_b",name:"Kevin Benard",gen:-1,married_to:"kori_l"},
+  {id:"jamie_g",name:"Jamie Gusea",b:"1978",gen:4,spouse:"adam_g"},
+  {id:"adam_g",name:"Adam Gusea",b:"1979",gen:-1,married_to:"jamie_g"},
+  {id:"dean_h",name:"Dean Hogsett",b:"1980",gen:4,children:["kane_h","kylin_h"]},
+  {id:"cory_j",name:"Cory Janson",b:"1977",gen:4,spouse:"lori_j"},
+  {id:"lori_j",name:"Lori Janson",b:"1977",gen:-1,married_to:"cory_j"},
+  {id:"kate_m",name:"Kate Mason",b:"1979",gen:4,spouse:"peat_m",children:["sam_m","max_m"]},
+  {id:"peat_m",name:"Peat Mason",b:"1969",gen:-1,married_to:"kate_m"},
+  {id:"eric_w",name:"Eric Wood",b:"1982",gen:4,children:["avelyn"]},
+  {id:"julie_h",name:"Julie Hufton",b:"1985",gen:4,spouse:"alister_h",children:["harrison","everett"]},
+  {id:"alister_h",name:"Alister Hufton",b:"1976",gen:-1,married_to:"julie_h"},
+  {id:"sara_w",name:"Sara Wright",gen:4,spouse:"josh_w",children:["jd_w","sam_w"]},
+  {id:"josh_w",name:"Josh Wright",gen:-1,married_to:"sara_w"},
+  {id:"alison_m",name:"Alison Miyasaki",gen:4},
+  {id:"teddy",name:"Theodore (Teddy) Miyasaki",b:"1987",gen:4,spouse:"amber_m",children:["ellie_m","calvin_m"]},
+  {id:"amber_m",name:"Amber Miyasaki",b:"1987",gen:-1,married_to:"teddy"},
+  {id:"jason_r",name:"Jason Romey",b:"1974",gen:4,notes:"Different surname from Lykke siblings; earlier relationship"},
+  {id:"niels_l",name:"Niels Lykke",b:"1988",gen:4},
+  {id:"kris_l",name:"Kris Lykke",b:"1991",gen:4,spouse:"dane_g"},
+  {id:"dane_g",name:"Dane Galloway",b:"1990",gen:-1,married_to:"kris_l",notes:"Compiled this document. Musician, social sciences researcher, JHU."},
+  {id:"angela",name:"Angela Golden Henry",b:"1988",gen:4,spouse:"nic_h",children:["veda"]},
+  {id:"nic_h",name:"Nic Golden Henry",b:"1989",gen:-1,married_to:"angela"},
+  {id:"melissa_g",name:"Melissa Golden",b:"1990",gen:4},
+  {id:"heather",name:"Heather Pollock",b:"2003",gen:4},
+  {id:"shane_f",name:"Shane Fukaye",b:"1994",gen:4},
+  {id:"alexis_f",name:"Alexis Fukaye",b:"1998",gen:4,children:["naomi_f"],notes:"⚠ XLSX lists Naomi's birth as Apr 1998, before Alexis (Dec 1998) — likely an error"},
+  {id:"kenzo",name:"Kenzo Amano-Johnson",b:"2021",gen:5},
+  {id:"koji",name:"Koji Amano-Johnson",b:"2021",gen:5},
+  {id:"naji",name:"Naji Amano-Johnson",b:"2025",gen:5},
+  {id:"shepard",name:"Shepard Luckett",b:"2014",gen:5},
+  {id:"delaney_l",name:"Delaney Luckett",b:"2017",gen:5},
+  {id:"miller",name:"Miller Thomas Baggs",b:"2013",gen:5},
+  {id:"owen_b",name:"Owen Rayburn Baggs",b:"2015",gen:5},
+  {id:"braxton",name:"Braxton Conaway",b:"~2012",gen:5},
+  {id:"emmaline",name:"Emmaline Conaway",b:"~2014",gen:5},
+  {id:"ovella",name:"Ovella Conaway",b:"~2016",gen:5},
+  {id:"zoe",name:"Zoë Conaway",b:"~2005",gen:5},
+  {id:"ella_c",name:"Ella Conaway",b:"~2006",gen:5},
+  {id:"owen_c",name:"Owen Conaway",b:"~2008",gen:5},
+  {id:"devin",name:"Devin Conaway",b:"~2011",gen:5},
+  {id:"clementine",name:"Clementine Conaway",b:"~2017",gen:5},
+  {id:"ivie",name:"Ivie Conaway",b:"2015",gen:5},
+  {id:"woodrow",name:"Woodrow Conaway",b:"2016",gen:5},
+  {id:"coco",name:"Coco Conaway",b:"2018",gen:5},
+  {id:"kareem",name:"Kareem Quincy Conaway",b:"2020",gen:5},
+  {id:"nyjah",name:"Nyjah Takahashi Conaway",b:"2022",gen:5},
+  {id:"masai",name:"Masai Umi Conaway",b:"2025",gen:5},
+  {id:"ella_tk",name:"Ella Toffoli-Kanemoto",b:"2014",gen:5},
+  {id:"sam_p",name:"Sam Peketz",b:"1993",gen:5},
+  {id:"grace_p",name:"Grace Peketz",b:"1997",gen:5},
+  {id:"opaline",name:"Opaline Miller",b:"2012",gen:5},
+  {id:"davis_c",name:"Davis Christenson",b:"2000",gen:5},
+  {id:"kyle_c",name:"Kyle Christenson",b:"2002",gen:5},
+  {id:"james_k",name:"James Kanemoto",b:"2017",gen:5},
+  {id:"sophie_k",name:"Sophie Kanemoto",b:"2017",gen:5},
+  {id:"kai_k",name:"Kai Kanemoto",b:"2018",gen:5,notes:"Twin with Klay"},
+  {id:"klay_k",name:"Klay Kanemoto",b:"2018",gen:5,notes:"Twin with Kai"},
+  {id:"pierce",name:"Pierce Benard",b:"2007",gen:5},
+  {id:"branton",name:"Branton Benard",b:"2012",gen:5},
+  {id:"kane_h",name:"Kane Hogsett",b:"2016",gen:5},
+  {id:"kylin_h",name:"Kylin Hogsett",b:"2018",gen:5},
+  {id:"sam_m",name:"Sam Mason",b:"2012",gen:5},
+  {id:"max_m",name:"Max Mason",b:"2014",gen:5},
+  {id:"avelyn",name:"Avelyn Wood",b:"2015",gen:5},
+  {id:"harrison",name:"Harrison Hufton",b:"2013",gen:5},
+  {id:"everett",name:"Everett Hufton",b:"2016",gen:5},
+  {id:"jd_w",name:"JD Wright",b:"2006",gen:5},
+  {id:"sam_w",name:"Sam Wright",b:"2008",gen:5},
+  {id:"ellie_m",name:"Ellis (Ellie) Rose Miyasaki",b:"2017",gen:5},
+  {id:"calvin_m",name:"Calvin Troy Miyasaki",b:"2020",gen:5},
+  {id:"veda",name:"Veda Fujiko Golden Henry",b:"2024",gen:5,notes:"Middle name Fujiko honors Mabel Shibao's middle name."},
+  {id:"naomi_f",name:"Naomi Flanary Fukaye",gen:5,notes:"⚠ Birth year in XLSX appears erroneous (listed before mother)"},
+];
+
+const byId = {};
+RAW.forEach(p => { byId[p.id] = p; });
+
+const collapsed = new Set();
+
+function shortName(name) {
+  if (name.length <= 19) return name;
+  const parts = name.split(' ');
+  if (parts.length >= 2) {
+    const first = parts[0];
+    const last = parts[parts.length - 1];
+    const mid = parts.length > 2 ? ' ' + parts[1][0] + '.' : '';
+    const attempt = first + mid + ' ' + last;
+    return attempt.length <= 20 ? attempt : first + ' ' + last;
+  }
+  return name.substring(0, 19);
+}
+
+function buildTree() {
+  const svg = d3.select('svg#tree');
+  svg.selectAll('*').remove();
+
+  const g = svg.append('g').attr('class', 'zoom-g');
+  const zoom = d3.zoom().scaleExtent([0.1, 2.5]).on('zoom', e => g.attr('transform', e.transform));
+  svg.call(zoom);
+  window._zoom = zoom; window._svg = svg;
+
+  const branches = ['mary','jack_nii','chiyo','jane','john','lily'];
+  const BRANCH_GAP = 55;
+  let allNodes = [], allLinks = [];
+  let curX = 20;
+  const gen2Y = 10 + YGEN;
+
+  branches.forEach(brId => {
+    const root = byId[brId];
+    const spouse = root.spouse ? byId[root.spouse] : null;
+    const isCollapsed = collapsed.has(brId);
+    const nodeX = curX;
+    const spouseX = nodeX + W + 8;
+
+    allNodes.push({ ...root, x: nodeX, y: gen2Y, branchRoot: true });
+    if (spouse) allNodes.push({ ...spouse, x: spouseX, y: gen2Y });
+
+    if (!isCollapsed) {
+      const children = root.children || [];
+      let childX = curX;
+
+      children.forEach(cid => {
+        const child = byId[cid];
+        if (!child) return;
+        const cspouse = child.spouse ? byId[child.spouse] : null;
+        const cIsCollapsed = collapsed.has(cid);
+        const cY = gen2Y + YGEN;
+
+        allNodes.push({ ...child, x: childX, y: cY });
+        allLinks.push({ x1: nodeX + W/2, y1: gen2Y + H, x2: childX + W/2, y2: cY });
+        if (cspouse) allNodes.push({ ...cspouse, x: childX + W + 8, y: cY });
+
+        let janLemanX = childX + W * 3 + 30;
+
+        if (!cIsCollapsed) {
+          const grandkids = child.children || [];
+          let gkX = childX;
+
+          if (child.id === 'ed_k') {
+            const jan = byId['jan_k'];
+            const lemans = ['katie_l','kori_l'];
+            let lX = childX + (W + 8) * 2 + 20;
+            lemans.forEach(lid => {
+              const lp = byId[lid]; if (!lp) return;
+              const lY = cY + YGEN;
+              allNodes.push({ ...lp, x: lX, y: lY });
+              allLinks.push({ x1: childX + W + 8 + W/2, y1: cY + H, x2: lX + W/2, y2: lY, dash: true });
+              const lsp = lp.spouse ? byId[lp.spouse] : null;
+              if (lsp) allNodes.push({ ...lsp, x: lX + W + 8, y: lY });
+              const lgks = lp.children || [];
+              lgks.forEach((lgkid, li) => {
+                const lgk = byId[lgkid]; if (!lgk) return;
+                allNodes.push({ ...lgk, x: lX + li * (W + 5), y: lY + YGEN });
+                allLinks.push({ x1: lX + W/2, y1: lY + H, x2: lX + li * (W + 5) + W/2, y2: lY + YGEN });
+              });
+              lX += (W + 8) * 2 + 10;
+              janLemanX = lX;
+            });
+          }
+
+          grandkids.forEach(gkid => {
+            const gk = byId[gkid]; if (!gk) return;
+            const gkIsCollapsed = collapsed.has(gkid);
+            const gkY = cY + YGEN;
+            allNodes.push({ ...gk, x: gkX, y: gkY });
+            allLinks.push({ x1: childX + W/2, y1: cY + H, x2: gkX + W/2, y2: gkY });
+            const gksp = gk.spouse ? byId[gk.spouse] : null;
+            if (gksp) allNodes.push({ ...gksp, x: gkX + W + 8, y: gkY });
+
+            if (!gkIsCollapsed) {
+              const ggks = gk.children || [];
+              ggks.forEach((ggkid, ggi) => {
+                const ggk = byId[ggkid]; if (!ggk) return;
+                allNodes.push({ ...ggk, x: gkX + ggi * (W + 4), y: gkY + YGEN });
+                allLinks.push({ x1: gkX + W/2, y1: gkY + H, x2: gkX + ggi * (W + 4) + W/2, y2: gkY + YGEN });
+              });
+              gkX += Math.max(W + 20, (gk.children || []).length * (W + 4) + 10);
+            } else {
+              gkX += W + 20;
+            }
+          });
+
+          childX = Math.max(gkX, childX + W + 20);
+        } else {
+          childX += W + 20;
+        }
+
+        childX += BRANCH_GAP / 2;
+      });
+
+      curX = Math.max(curX + W * 2 + BRANCH_GAP, childX + BRANCH_GAP / 2);
+    } else {
+      curX += W * 2 + 30 + BRANCH_GAP;
+    }
+  });
+
+  const gen1Y = 10;
+  const kuniX = Math.max(20, curX / 2 - W - 10);
+  const sonoX = kuniX + W + 10;
+  allNodes.unshift({ ...byId['sono'], x: sonoX, y: gen1Y });
+  allNodes.unshift({ ...byId['kunihei'], x: kuniX, y: gen1Y });
+
+  const midX = kuniX + W + 5;
+  const gen2Starts = [];
+  let bx = 20;
+  branches.forEach(brId => {
+    gen2Starts.push(bx + W/2);
+    bx += (collapsed.has(brId) ? W*2+30 : W*2) + BRANCH_GAP;
+  });
+
+  gen2Starts.forEach(gx => {
+    allLinks.unshift({ x1: midX, y1: gen1Y + H, x2: gx, y2: gen2Y });
+  });
+
+  const totalW = curX + 30;
+  const totalH = gen1Y + YGEN * 5 + H + 50;
+  svg.attr('width', totalW).attr('height', totalH);
+
+  g.selectAll('.link').data(allLinks).join('line')
+    .attr('class', 'link')
+    .attr('x1', d => d.x1).attr('y1', d => d.y1)
+    .attr('x2', d => d.x2).attr('y2', d => d.y2)
+    .attr('stroke', d => d.dash ? '#aaa' : '#ccc')
+    .attr('stroke-width', d => d.dash ? 0.8 : 1.2)
+    .attr('stroke-dasharray', d => d.dash ? '4,3' : 'none');
+
+  const seen = new Set();
+  const uniq = allNodes.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true; });
+
+  document.getElementById('count').textContent = uniq.length + ' individuals';
+
+  const tt = document.getElementById('tooltip');
+  const nodeGs = g.selectAll('.node-g').data(uniq, d => d.id).join('g')
+    .attr('class', 'node-g')
+    .attr('transform', d => `translate(${d.x},${d.y})`)
+    .on('click', (e, d) => {
+      e.stopPropagation();
+      if (d.children && d.children.length) {
+        if (collapsed.has(d.id)) collapsed.delete(d.id);
+        else collapsed.add(d.id);
+        buildTree();
+      }
+    })
+    .on('mouseover', (e, d) => {
+      let html = `<strong>${d.name}</strong>`;
+      const dates = [d.b && `b. ${d.b}`, d.d && `d. ${d.d}`].filter(Boolean);
+      if (dates.length) html += `<div class="tt-dates">${dates.join(' · ')}</div>`;
+      if (d.notes) html += `<div class="tt-note">${d.notes}</div>`;
+      if (d.children && d.children.length) html += `<div class="tt-hint">${collapsed.has(d.id) ? '▶ Click to expand' : '▼ Click to collapse'}</div>`;
+      tt.innerHTML = html;
+      tt.style.display = 'block';
+      tt.style.left = (e.clientX + 14) + 'px';
+      tt.style.top = (e.clientY - 10) + 'px';
+    })
+    .on('mousemove', e => { tt.style.left = (e.clientX + 14) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; })
+    .on('mouseout', () => { tt.style.display = 'none'; });
+
+  nodeGs.append('rect')
+    .attr('width', W).attr('height', H).attr('rx', 6)
+    .attr('fill', d => GEN_COLORS[d.gen] || '#888780')
+    .attr('opacity', d => d.gen === -1 ? 0.55 : 1);
+
+  nodeGs.append('text')
+    .attr('x', W/2).attr('y', H/2 - 5)
+    .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+    .attr('fill', 'white').attr('font-size', '10.5px').attr('font-weight', '500')
+    .attr('pointer-events', 'none')
+    .text(d => shortName(d.name));
+
+  nodeGs.append('text')
+    .attr('x', W/2).attr('y', H - 8)
+    .attr('text-anchor', 'middle')
+    .attr('fill', 'rgba(255,255,255,0.72)').attr('font-size', '9px')
+    .attr('pointer-events', 'none')
+    .text(d => {
+      const parts = [];
+      if (d.b) parts.push(d.b);
+      if (d.d) parts.push('d.' + d.d);
+      return parts.join(' · ');
+    });
+
+  nodeGs.filter(d => d.children && d.children.length).append('text')
+    .attr('x', W - 5).attr('y', 9)
+    .attr('text-anchor', 'middle').attr('fill', 'rgba(255,255,255,0.85)').attr('font-size', '9px')
+    .attr('pointer-events', 'none')
+    .text(d => collapsed.has(d.id) ? '▶' : '▼');
+
+  window._allNodes = uniq;
+}
+
+window.expandAll = () => { collapsed.clear(); buildTree(); };
+window.collapseAll = () => {
+  ['mary','jack_nii','chiyo','jane','john','lily','jean','nadine','julie_t','stanley','mark_a','ken_k','joyce','ed_k','gail_k','karen_k','gwendy','tammy','meri','greg_f','glenn','melanie','jenny_l','daniel_b','clinton','emmett','marcus','kenji'].forEach(id => collapsed.add(id));
+  buildTree();
+};
+window.resetZoom = () => {
+  window._svg.transition().duration(450).call(window._zoom.transform, d3.zoomIdentity.translate(16, 16).scale(0.55));
+};
+window.searchNode = q => {
+  const ql = q.toLowerCase();
+  d3.selectAll('.node-g').each(function(d) {
+    const match = !q || d.name.toLowerCase().includes(ql);
+    d3.select(this).selectAll('rect, text').attr('opacity', match ? null : 0.15);
+  });
+};
+
+buildTree();
+setTimeout(resetZoom, 150);
+</script>
+</body>
+</html>
